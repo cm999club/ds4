@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════════════════════
+  ds4 (DwarfStar) — Riepilogo configurazione (Linux + ROCm, dGPU)
+  Aggiornato: 2026-07-07 — repo su main, ROCm integrato upstream
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 HARDWARE
+─────────────────────────────────────────────────────────────────────────────
+✓ CPU:  Ryzen 9 9950X3D (16 core) — thread host e build veloci
+✓ GPU:  Radeon AI PRO R9700 32GB, RDNA4 (gfx1201) — SUPPORTATA via ROCm
+✓ RAM:  128GB — il GGUF q2 (~81GB) sta in page cache: miss di streaming veloci
+✓ OS:   Ubuntu 26.04 LTS + ROCm 7.x
+
+⚠ Nota: target upstream primario = Strix Halo (gfx1151/UMA). gfx1201 dGPU è
+  compatibile (wave32, rocWMMA/hipBLASLt gfx12) ma meno testata.
+  Feedback → https://github.com/antirez/ds4/issues/16
+
+🛠️ SETUP (dettagli in SETUP_LINUX.md)
+─────────────────────────────────────────────────────────────────────────────
+1. ROCm:    apt install hipcc rocminfo rocm-smi libamdhip64-dev libhipblas-dev
+            libhipblaslt-dev librocblas-dev librocwmma-dev libhipcub-dev
+            + copiare gli header rocwmma/internal/ (vedi SETUP_LINUX.md §1)
+            + usermod -aG render,video $USER
+            NIENTE parametri kernel GTT (solo per APU/UMA, non per dGPU)
+
+2. Build:   make strix-halo ROCM_ARCH=gfx1201 -j$(nproc)
+            (default gfx1151 → va SEMPRE sovrascritto)
+
+3. Modello: ./download_model.sh q2-imatrix     (~81GB, consigliato)
+            ./download_model.sh mtp            (~3.5GB, opzionale)
+            Il GGUF locale attuale è il vecchio chat-v2 NON-imatrix.
+            Evitare q2-q4-imatrix su ROCm per ora (pressione di memoria).
+
+4. Run:     cat gguf/*imatrix*.gguf > /dev/null        # warm page cache
+            ./ds4 -m ds4flash.gguf --ssd-streaming --ctx 32768 --nothink
+
+▶️ COMANDI UTILI
+─────────────────────────────────────────────────────────────────────────────
+MTP (decode più veloce):
+  ./ds4 -m ds4flash.gguf --ssd-streaming --ctx 32768 \
+    --mtp gguf/DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf --mtp-draft 2
+
+Server API (OpenAI/Anthropic-compatibile) + KV su disco:
+  ./ds4-server -m ds4flash.gguf --ssd-streaming --ctx 100000 \
+    --kv-disk-dir /tmp/ds4-kv --kv-disk-space-mb 8192
+
+Agent nativo (alpha):   ./ds4-agent
+Benchmark / qualità:    ./ds4-bench   ./ds4-eval
+Debug problemi:         aggiungere --trace e aprire issue col trace
+
+💡 COME FUNZIONA QUI (32GB VRAM < modello 81GB)
+─────────────────────────────────────────────────────────────────────────────
+--ssd-streaming: pesi non-MoE residenti in VRAM; esperti routed in una cache
+VRAM auto-dimensionata (report all'avvio); i miss leggono dal GGUF, servito
+dalla page cache di Linux (RAM) → colli di bottiglia: PCIe, non SSD.
+Cache manuale: --ssd-streaming-cache-experts NGB (se l'auto non basta).
+═══════════════════════════════════════════════════════════════════════════════
